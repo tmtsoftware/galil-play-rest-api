@@ -35,7 +35,14 @@ class GsRouter @Inject()(controller: GsController) extends SimpleRouter {
      case POST(p"/positionAbsolute") =>
       controller.process()
      
-            
+    // get a config
+     case GET(p"/getConfig" ? q"axis=$axisStr") => controller.getConfig(axisStr(0))
+     
+    // create or update a config
+     case POST(p"/setConfig" ? q"axis=$axisStr") => controller.setConfig(axisStr(0))
+      
+      
+      
       
     // Example: http://localhost:9000/v1/gs/setRelTarget?axis=A&count=2
     case POST(p"/setRelTarget" ? q_o"obsId=$maybeObsId" & q"axis=$axisStr" & q"count=$countStr") =>
