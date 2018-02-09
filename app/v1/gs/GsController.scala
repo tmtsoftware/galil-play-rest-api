@@ -1,44 +1,26 @@
 package v1.gs
 
 import java.net.InetAddress
-import javax.inject.Inject
 
+import javax.inject.Inject
 import akka.actor.ActorSystem
-import csw.messages.ccs.commands.CommandName
 import csw.messages.params.models.{ObsId, Prefix}
 import csw.proto.galil.client.GalilHcdClient
 import csw.services.location.commons.ClusterAwareSettings
 import csw.services.logging.scaladsl.LoggingSystemFactory
 import play.api.libs.json.Json
 import play.api.mvc._
-import csw.messages.ccs.commands.CommandResponse.Error
-import csw.messages.ccs.commands.CommandResponse
-
-import csw.services.location.scaladsl.{LocationService, LocationServiceFactory}
-import csw.services.config.api.scaladsl.{ConfigClientService, ConfigService}
+import csw.services.location.scaladsl.LocationServiceFactory
+import csw.services.config.api.scaladsl.ConfigService
 import csw.services.config.client.scaladsl.ConfigClientFactory
-import csw.services.config.server.ServerWiring
-import csw.services.config.api.models.{ConfigData, ConfigId, ConfigMetadata, FileType}
+import csw.services.config.api.models.ConfigData
 import java.nio.file.{Path, Paths}
 
-import scala.concurrent.ExecutionContext
-import scala.concurrent.Future
-import scala.concurrent.duration._
-import scala.concurrent.Await
+import scala.concurrent.{ExecutionContext, Future}
+import com.typesafe.config.ConfigRenderOptions
+import akka.stream.ActorMaterializer
 
 import scala.async.Async._
-
-import csw.services.config.client.internal.ActorRuntime
-
-import com.typesafe.config.ConfigRenderOptions
-
-
-import akka.stream.ActorMaterializer
-import play.api.data.Form
-
-
-case class AxisCountFormInput(axis: String, count: Int)
-
 
 /**
   * Takes HTTP requests and produces JSON.
@@ -46,383 +28,140 @@ case class AxisCountFormInput(axis: String, count: Int)
 class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionContext)
   extends GsBaseController(cc) {
 
-  //  private val logger = Logger(getClass)
-  private val system: ActorSystem = ClusterAwareSettings.system
+  implicit val system: ActorSystem = ClusterAwareSettings.system
+  private val locationService = LocationServiceFactory.withSystem(system)
   private val host = InetAddress.getLocalHost.getHostName
+  implicit val mat: ActorMaterializer = ActorMaterializer()
   private val prefix = Prefix("test.galil.server")
-  private val galilHcdClient = GalilHcdClient(prefix, system)
-  
-  
-  private val locationService = LocationServiceFactory.withSettings(ClusterAwareSettings.onPort(3552))
-  
-  implicit val ActorSystem = system
-  
-
-  
+  private val galilHcdClient = GalilHcdClient(prefix, system, locationService)
   private val adminApi: ConfigService = ConfigClientFactory.adminApi(system, locationService)
-  
-  
+
   LoggingSystemFactory.start("GalilHcdClientApp", "0.1", host, system)
 
-  
-  
-  private val form: Form[AxisCountFormInput] = {
-    import play.api.data.Forms._
-
-    Form(
-      mapping(
-        "axis" -> nonEmptyText,
-        "count" -> number
-      )(AxisCountFormInput.apply)(AxisCountFormInput.unapply)
-    )
-  }
-
-  def process: Action[AnyContent] = {
-    GsAction.async { implicit request =>
-      processJsonPost()
+  def init(obsId: Option[ObsId], axis: Char): Action[AnyContent] = GsAction.async { implicit request =>
+    (for {
+      resp1 <- galilHcdClient.setBrushlessAxis(obsId, axis)
+      resp2 <- galilHcdClient.setAnalogFeedbackSelect(obsId, axis, 6)
+      resp3 <- galilHcdClient.setBrushlessModulus(obsId, axis, 52000)
+      resp4 <- galilHcdClient.brushlessZero(obsId, axis, 1.0)
+    } yield {
+      Ok(Json.toJson(s"setBrushlessAxis $resp1\nsetAnalogFeedbackSelect $resp2\nsetBrushlessModulus $resp3\nbrushlessZero $resp4"))
+    }).recover {
+      case ex => InternalServerError(ex.getMessage)
     }
   }
 
-  private def processJsonPost[A]()(implicit request: GsRequest[A]):  Future[Result] = {
-    def failure(badForm: Form[AxisCountFormInput]) = {
-      Future.successful(BadRequest(badForm.errorsAsJson))
-    }
-
-    def success(input: AxisCountFormInput) = {
-            
-      request.target.path match  {
-        
-        case "/v1/gs/positionAbsolute/" => doPositionAbsolute(Some(ObsId("123")), input.axis(0), input.count).map { response => {
-           Ok(Json.toJson(response)) }
-        }
-        
-        case "/v1/gs/positionRelative/" => doPositionRelative(Some(ObsId("123")), input.axis(0), input.count).map { response => Ok(Json.toJson(response)) }
-      
-        case "/v1/gs/motorOff/" => doMotorOff(Some(ObsId("123")), input.axis(0)).map { response => Ok(Json.toJson(response)) }
-      
-        case "/v1/gs/init/" => doInit(Some(ObsId("123")), input.axis(0)).map { response => {
-          
-          Ok(Json.toJson(response)) }
-        }
-      
-        case "/v1/gs/home/" => doHome(Some(ObsId("123")), input.axis(0)).map { response => Ok(Json.toJson(response)) }
-      
-        
-      }
-      
-    }
-
-    form.bindFromRequest().fold(failure, success)
-  }
-  
-  
-  
-  
- 
-
-  
-  
-  def doInit(obsId: Option[ObsId], axis: Char): Future[String] = {
-  
-   
-    Future {
-      
-      val output = new StringBuilder()
-      
-      try {
-    
-        val resp1 = Await.result(galilHcdClient.setBrushlessAxis(obsId, axis), 3.seconds)
-        
-        if (resp1.isInstanceOf[Error]) throw new Exception(s"setBushelessAxis $resp1") else output.append(s"\nsetBrushlessAxis $resp1, ")
-        
-        Thread.sleep(1000) 
-        val resp2 = Await.result(galilHcdClient.setAnalogFeedbackSelect(obsId, axis, 6), 3.seconds)
-        
-        if (resp2.isInstanceOf[Error]) throw new Exception(s"setAnalogFeedbackSelect $resp2") else output.append(s"\nsetAnalogFeedbackSelect $resp2, ")
-        
-        Thread.sleep(1000) 
-        val resp3 = Await.result(galilHcdClient.setBrushlessModulus(obsId, axis, 52000), 3.seconds)
-       
-        if (resp3.isInstanceOf[Error]) throw new Exception(s"setBrushlessModulus $resp3") else output.append(s"\nsetBrushlessModulus $resp3, ")
-     
-        Thread.sleep(1000) 
-        val resp4 = Await.result(galilHcdClient.brushlessZero(obsId, axis, 1.0), 3.seconds)
-        
-        if (resp4.isInstanceOf[Error]) throw new Exception(s"brushlessZero $resp4") else output.append(s"\nbrushlessZero $resp4")
-        
-        output.toString()
-  
-      } catch {
-        
-        case e: Exception => e.getMessage()
-        
-      }
-    
-    }
-    
-  }
-  
-  def doHome(obsId: Option[ObsId], axis: Char): Future[String] = {
-  
-   
-    Future {
-    
-      val output = new StringBuilder()
-      
-      try {
-
-        val resp1 = Await.result(galilHcdClient.setHomingMode(obsId, axis), 3.seconds)
-      
-        if (resp1.isInstanceOf[Error]) throw new Exception(s"setHomingMode $resp1") else output.append(s"\nsetHomingMode $resp1, ")
-
-        
-        val resp2 = Await.result(galilHcdClient.setJogSpeed(obsId, axis, 166), 3.seconds)
-        
-        if (resp2.isInstanceOf[Error]) throw new Exception(s"setJogSpeed $resp2") else output.append(s"\nsetJogSpeed $resp2, ")
-
-      
-        val resp3 = Await.result(galilHcdClient.beginMotion(obsId, axis), 3.seconds)
-        
-        if (resp3.isInstanceOf[Error]) throw new Exception(s"beginMotion $resp3") else output.append(s"\nbeginMotion $resp3, ")
-
-      
-        output.toString()
-  
-      } catch {
-        
-        case e: Exception => e.getMessage()
-        
-      }
-      
-    }
-    
-  }
-  
-  def doMotorOff(obsId: Option[ObsId], axis: Char): Future[String] = {
- 
-    Future {
-      
-      val output = new StringBuilder()
-      
-      try {
-
-      
-        val resp1 = Await.result(galilHcdClient.motorOff(obsId, axis), 3.seconds)
-        
-        if (resp1.isInstanceOf[Error]) throw new Exception(s"motorOff $resp1") else output.append(s"\nmotorOff $resp1, ")
-      
-        output.toString()
-  
-      } catch {
-        
-        case e: Exception => e.getMessage()
-        
-      }
-      
+  def home(obsId: Option[ObsId], axis: Char): Action[AnyContent] = GsAction.async { implicit request =>
+    (for {
+      resp1 <- galilHcdClient.setHomingMode(obsId, axis)
+      resp2 <- galilHcdClient.setJogSpeed(obsId, axis, 166)
+      resp3 <- galilHcdClient.beginMotion(obsId, axis)
+    } yield {
+      Ok(Json.toJson(s"setHomingMode $resp1\nsetJogSpeed $resp2\nbeginMotion $resp3"))
+    }).recover {
+      case ex => InternalServerError(ex.getMessage)
     }
   }
-  
-  def doPositionRelative(obsId: Option[ObsId], axis: Char, counts: Int): Future[String] = {
- 
-    Future {
-    
-      val output = new StringBuilder()
-      
-      try {
 
-      
-        val resp1 = Await.result(galilHcdClient.setRelTarget(obsId, axis, counts), 3.seconds)
-      
-        if (resp1.isInstanceOf[Error]) throw new Exception(s"setRelTarget $resp1") else output.append(s"\nsetRelTarget $resp1, ")
-        
-        val resp2 = Await.result(galilHcdClient.beginMotion(obsId, axis), 3.seconds)
-        
-        if (resp2.isInstanceOf[Error]) throw new Exception(s"beginMotion $resp2") else output.append(s"\nbeginMotion $resp2, ")
-
-      
-        output.toString()
-  
-      } catch {
-        
-        case e: Exception => e.getMessage()
-        
-      }
+  def motorOff(obsId: Option[ObsId], axis: Char): Action[AnyContent] = GsAction.async { implicit request =>
+    galilHcdClient.motorOff(obsId, axis).map { response =>
+      Ok(Json.toJson(s"\nmotorOff $response"))
+    }.recover {
+      case ex => InternalServerError(ex.getMessage)
     }
   }
-  
-  def doPositionAbsolute(obsId: Option[ObsId], axis: Char, counts: Int): Future[String] = {
- 
-    Future {
-    
-      val output = new StringBuilder()
-      
-      try {
 
-        val resp1 = Await.result(galilHcdClient.setAbsTarget(obsId, axis, counts), 3.seconds)
-      
-        if (resp1.isInstanceOf[Error]) throw new Exception(s"setAbsTarget $resp1") else output.append(s"\nsetAbsTarget $resp1, ")
-
-        val resp2 = Await.result(galilHcdClient.beginMotion(obsId, axis), 3.seconds)
-        
-        if (resp2.isInstanceOf[Error]) throw new Exception(s"beginMotion $resp2") else output.append(s"\nbeginMotion $resp2, ")
-
-      
-        output.toString()
-  
-      } catch {
-        
-        case e: Exception => e.getMessage()
-        
-      }
-      
-      
+  def positionRelative(obsId: Option[ObsId], axis: Char, counts: Int): Action[AnyContent] = GsAction.async { implicit request =>
+    (for {
+      resp1 <- galilHcdClient.setRelTarget(obsId, axis, counts)
+      resp2 <- galilHcdClient.beginMotion(obsId, axis)
+    } yield {
+      Ok(Json.toJson(s"setRelTarget $resp1\nbeginMotion $resp2"))
+    }).recover {
+      case ex => InternalServerError(ex.getMessage)
     }
   }
-  
-  //*******************************************************//
-  // Configuration Service API                             //
-  //*******************************************************//
-  
+
+  def positionAbsolute(obsId: Option[ObsId], axis: Char, counts: Int): Action[AnyContent] = GsAction.async { implicit request =>
+    (for {
+      resp1 <- galilHcdClient.setAbsTarget(obsId, axis, counts)
+      resp2 <- galilHcdClient.beginMotion(obsId, axis)
+    } yield {
+      Ok(Json.toJson(s"setAbsTarget $resp1\nbeginMotion $resp2"))
+    }).recover {
+      case ex => InternalServerError(ex.getMessage)
+    }
+  }
+
+  // Configuration Service API
+  // (Note: This could also be done using the config service command line or HTTP APIs)
+  private def getConfigPath(axis: Char): Path = {
+    Paths.get("/tmt/aps/ics/galil/" + axis + "/hcd.conf")
+  }
+
   def getConfig(axis: Char): Action[AnyContent] = GsAction.async { implicit request =>
-    doGetConfig(axis).map { response =>
-      Ok(Json.parse(response)) 
-    }
-  }
-  
-  
-  
-  
- 
-          
- 
-  
-  def doGetConfig(axis: Char): Future[String] = {
-      
-    
-    implicit val mat: ActorMaterializer = ActorMaterializer();
-    
-    Future {
-      // construct the path
-      val filePath = Paths.get("/tmt/aps/ics/galil/" + axis + "/hcd.conf")
-
-      try {
-        
-
-        
-        val activeFile: Option[ConfigData] = Await.result(adminApi.getActive(filePath), 3.seconds)
-        
-        val configData1 = activeFile.getOrElse(throw new Exception("no result found"))
-        
-        val config = Await.result(configData1.toConfigObject, 3.seconds)
-        
-        config.root().render( ConfigRenderOptions.concise() )
-        
- 
-      } catch {
-        case e: Exception => e.getMessage()
-      }
-    }
-  }
-  
-  case class ConfigFormInput(data: String)
-
-  private val configForm: Form[ConfigFormInput] = {
-    import play.api.data.Forms._
-
-    Form(
-      mapping(
-        "data" -> nonEmptyText
-      )(ConfigFormInput.apply)(ConfigFormInput.unapply)
-    )
-  }
-
-  def setConfig(axis: Char): Action[AnyContent] = {
-    GsAction.async { implicit request =>
-      processUpdateConfig(axis)
+    val filePath = getConfigPath(axis)
+    (for {
+      activeFile <- adminApi.getActive(filePath)
+      config <- activeFile.get.toConfigObject
+    } yield {
+      Ok(Json.parse(config.root().render(ConfigRenderOptions.concise())))
+    }).recover {
+      case ex => InternalServerError(ex.getMessage)
     }
   }
 
-  private def processUpdateConfig[A](axis: Char)(implicit request: GsRequest[A]):  Future[Result] = {
-    def failure(badForm: Form[ConfigFormInput]) = {
-      Future.successful(BadRequest(badForm.errorsAsJson))
-    }
-
-    def success(input: ConfigFormInput) = {
-            
-      doUpdateConfig(axis, input.data).map { response => Ok(Json.toJson(response)) }
-      
-    }
-
-    configForm.bindFromRequest().fold(failure, success)
-  }
-  
-    def doUpdateConfig(axis: Char, input: String): Future[String] = {
-      
-    Future {
-      // construct the path
-      val filePath = Paths.get("/tmt/aps/ics/galil/" + axis + "/hcd.conf")
-
-      try {
-        
-        
-        val exists: Boolean = Await.result(adminApi.exists(filePath), 3.seconds)
-        
-        if (exists) {
-                   
-            Await.result(adminApi.update(filePath, ConfigData.fromString(input), comment = "updated"), 3.seconds)
-            Await.result(adminApi.resetActiveVersion(filePath, "latest active"), 3.seconds)
-            "updated"
-        } else {
-            Await.result(adminApi.create(filePath, ConfigData.fromString(input), annex = false, "First commit"), 3.seconds)
-            "created"
-        }
- 
-      } catch {
-        case e: Exception => e.getMessage()
-      }
+  def setConfig(axis: Char): Action[AnyContent] = GsAction.async { implicit request =>
+    val data = request.body.asJson.get.toString()
+    doUpdateConfig(axis, data).map { response =>
+      Ok(Json.toJson(response))
+    }.recover {
+      case ex => BadRequest(ex.getMessage)
     }
   }
-  
-  // read current values and update inputs
-  def readAndMerge(filePath: Path, input: String): String = {
-    
-    implicit val mat: ActorMaterializer = ActorMaterializer();
-           
-    // Read
-    val activeFile: Option[ConfigData] = Await.result(adminApi.getActive(filePath), 3.seconds)
-    
-    val configData1 = activeFile.getOrElse(throw new Exception("no result found"))
-    
-    val currentConfig = Await.result(configData1.toConfigObject, 3.seconds)
-           
-    val inputConfigData = ConfigData.fromString(input)
-    val inputConfig = Await.result(inputConfigData.toConfigObject, 3.seconds)
-       
-    println("currentConfig = " + currentConfig.root().render( ConfigRenderOptions.concise()))
-    
-    val key = "props.InterpolationCounts"
-    val updatedConfig = currentConfig.withValue(key, inputConfig.getValue(key)) 
-    
-    println("updatedConfig = " + updatedConfig.root().render( ConfigRenderOptions.concise()))
-    
-    inputConfig.withFallback(currentConfig).root().render( ConfigRenderOptions.concise() )
-    
-    
+
+  private def doUpdateConfig(axis: Char, input: String): Future[String] = async {
+    val filePath = getConfigPath(axis)
+    val exists = await(adminApi.exists(filePath))
+    if (exists) {
+      await(adminApi.update(filePath, ConfigData.fromString(input), comment = "updated"))
+      await(adminApi.resetActiveVersion(filePath, "latest active"))
+      "updated"
+    } else {
+      await(adminApi.create(filePath, ConfigData.fromString(input), annex = false, "First commit"))
+      "created"
+    }
   }
-  
-  
-  
-  def setRelTarget(obsId: Option[ObsId], axis: Char, count: Int): Action[AnyContent] = GsAction.async  { implicit request =>
+
+  //  // read current values and update inputs (XXX not used)
+  //  def readAndMerge(filePath: Path, input: String): String = {
+  //    // Read
+  //    val activeFile: Option[ConfigData] = Await.result(adminApi.getActive(filePath), 3.seconds)
+  //    val configData1 = activeFile.getOrElse(throw new Exception("no result found"))
+  //    val currentConfig = Await.result(configData1.toConfigObject, 3.seconds)
+  //    val inputConfigData = ConfigData.fromString(input)
+  //    val inputConfig = Await.result(inputConfigData.toConfigObject, 3.seconds)
+  //
+  //    println("currentConfig = " + currentConfig.root().render(ConfigRenderOptions.concise()))
+  //
+  //    val key = "props.InterpolationCounts"
+  //    val updatedConfig = currentConfig.withValue(key, inputConfig.getValue(key))
+  //
+  //    println("updatedConfig = " + updatedConfig.root().render(ConfigRenderOptions.concise()))
+  //
+  //    inputConfig.withFallback(currentConfig).root().render(ConfigRenderOptions.concise())
+  //  }
+
+
+  def setRelTarget(obsId: Option[ObsId], axis: Char, count: Int): Action[AnyContent] = GsAction.async { implicit request =>
     galilHcdClient.setRelTarget(obsId, axis, count).map { response =>
-      
-      Ok(Json.toJson(response.toString)) // XXX Temp: Need JSON I/O for CommandResponse?
+      Ok(Json.toJson(response.toString)) // XXX Temp: Need JSON I/O for CommandResponse
     }
-  
   }
 
   def getRelTarget(obsId: Option[ObsId], axis: Char): Action[AnyContent] = GsAction.async { implicit request =>
     galilHcdClient.getRelTarget(obsId, axis).map { response =>
-      Ok(Json.toJson(response.toString)) // XXX Temp: Need JSON I/O for CommandResponse?
+      Ok(Json.toJson(response.toString)) // XXX Temp: Need JSON I/O for CommandResponse
     }
   }
 }
