@@ -124,12 +124,16 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
     val filePath = getConfigPath(axis)
     val exists = await(adminApi.exists(filePath))
     if (exists) {
-      await(adminApi.update(filePath, ConfigData.fromString(input), comment = "updated"))
-      await(adminApi.resetActiveVersion(filePath, "latest active"))
-      "updated"
+      // Note: Using for comp to work around compiler warning
+      // "a pure expression does nothing in statement position; multiline expressions might require enclosing parentheses"
+      await(for {
+        _ <- adminApi.update(filePath, ConfigData.fromString(input), comment = "updated")
+        _ <- adminApi.resetActiveVersion(filePath, "latest active")
+      } yield "updated")
     } else {
-      await(adminApi.create(filePath, ConfigData.fromString(input), annex = false, "First commit"))
-      "created"
+      await(for {
+        _ <- adminApi.create(filePath, ConfigData.fromString(input), annex = false, "First commit")
+      } yield "created")
     }
   }
 
