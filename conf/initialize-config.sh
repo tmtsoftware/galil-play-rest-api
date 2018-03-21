@@ -1,15 +1,15 @@
-#curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://localhost:9000/v1/gs/setConfig?axis=A -v -s
-#sleep 3s
-#curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://localhost:9000/v1/gs/setConfig?axis=B -v -s
-#sleep 3s
-#curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://localhost:9000/v1/gs/setConfig?axis=C -v -s
-#sleep 3s
-curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://localhost:9000/v1/gs/setConfig?axis=D -v -s
-sleep  3s
-curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://localhost:9000/v1/gs/setConfig?axis=E -v -s
-sleep 3s
-curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://localhost:9000/v1/gs/setConfig?axis=F -v -s
-sleep 3s
-curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://localhost:9000/v1/gs/setConfig?axis=G -v -s
-sleep 3s
-curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://localhost:9000/v1/gs/setConfig?axis=H -v -s
+
+if [ $# -eq 0 ]; then
+  echo "Usage: initialize-config.sh <config service IP>"
+  exit 0
+fi
+
+
+curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://$1:4000/config//tmt/aps/ics/galil/A/hcd.conf -v -s --max-time 10 --no-keepalive
+curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://$1:4000/config//tmt/aps/ics/galil/B/hcd.conf -v -s --max-time 10 --no-keepalive
+curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://$1:4000/config//tmt/aps/ics/galil/C/hcd.conf -v -s --max-time 10 --no-keepalive
+curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://$1:4000/config//tmt/aps/ics/galil/D/hcd.conf -v -s --max-time 10 --no-keepalive
+curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://$1:4000/config//tmt/aps/ics/galil/E/hcd.conf -v -s --max-time 10 --no-keepalive
+curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://$1:4000/config//tmt/aps/ics/galil/F/hcd.conf -v -s --max-time 10 --no-keepalive
+curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://$1:4000/config//tmt/aps/ics/galil/G/hcd.conf -v -s --max-time 10 --no-keepalive
+curl -X POST -d @/home/smichaels/Desktop/GalilPrototype/galil-play-rest-api/conf/axis-default.json http://$1:4000/config//tmt/aps/ics/galil/H/hcd.conf -v -s --max-time 10 --no-keepalive

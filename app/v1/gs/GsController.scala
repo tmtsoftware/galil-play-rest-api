@@ -11,6 +11,7 @@ import csw.services.location.commons.ClusterAwareSettings
 import csw.services.logging.scaladsl.LoggingSystemFactory
 import play.api.libs.json.Json
 import play.api.mvc._
+import play.api.{Logger, MarkerContext}
 import csw.messages.ccs.commands.CommandResponse.Error
 import csw.messages.ccs.commands.CommandResponse
 
@@ -35,9 +36,10 @@ import com.typesafe.config.ConfigRenderOptions
 
 import akka.stream.ActorMaterializer
 import play.api.data.Form
+import com.typesafe.config.Config
 
 
-case class AxisCountFormInput(axis: String, count: Int)
+case class AxisCountFormInput(axis: String, count: Int, analogFeedbackSelect: Int, brushlessModulus: Int, brushlessZeroVolts: Double)
 
 
 /**
@@ -52,6 +54,7 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
   private val prefix = Prefix("test.galil.server")
   private val galilHcdClient = GalilHcdClient(prefix, system)
   
+  private val logger = Logger(this.getClass)
   
   private val locationService = LocationServiceFactory.withSettings(ClusterAwareSettings.onPort(3552))
   
@@ -68,11 +71,15 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
   
   private val form: Form[AxisCountFormInput] = {
     import play.api.data.Forms._
+    import play.api.data.format.Formats._
 
     Form(
       mapping(
         "axis" -> nonEmptyText,
-        "count" -> number
+        "count" -> number, 
+        "analogFeedbackSelect" -> number,
+        "brushlessModulus" -> number,
+        "brushlessZeroVolts" -> of[Double]
       )(AxisCountFormInput.apply)(AxisCountFormInput.unapply)
     )
   }
@@ -100,7 +107,7 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
       
         case "/v1/gs/motorOff/" => doMotorOff(Some(ObsId("123")), input.axis(0)).map { response => Ok(Json.toJson(response)) }
       
-        case "/v1/gs/init/" => doInit(Some(ObsId("123")), input.axis(0)).map { response => {
+        case "/v1/gs/init/" => doInit(Some(ObsId("123")), input.axis(0), input.analogFeedbackSelect, input.brushlessModulus, input.brushlessZeroVolts).map { response => {
           
           Ok(Json.toJson(response)) }
         }
@@ -122,8 +129,11 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
 
   
   
-  def doInit(obsId: Option[ObsId], axis: Char): Future[String] = {
+  def doInit(obsId: Option[ObsId], axis: Char, analogFeedbackSelect: Int, brushlessModulus: Int, brushlessZeroVolts: Double): Future[String] = {
   
+    println("DO INIT")
+    val config = getConfigSync(axis)
+    println(s"config = $config")
    
     Future {
       
@@ -136,19 +146,19 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
         if (resp1.isInstanceOf[Error]) throw new Exception(s"setBushelessAxis $resp1") else output.append(s"\nsetBrushlessAxis $resp1, ")
         
         Thread.sleep(1000) 
-        val resp2 = Await.result(galilHcdClient.setAnalogFeedbackSelect(obsId, axis, 6), 3.seconds)
+        val resp2 = Await.result(galilHcdClient.setAnalogFeedbackSelect(obsId, axis, analogFeedbackSelect), 3.seconds)
         
-        if (resp2.isInstanceOf[Error]) throw new Exception(s"setAnalogFeedbackSelect $resp2") else output.append(s"\nsetAnalogFeedbackSelect $resp2, ")
+        if (resp2.isInstanceOf[Error]) throw new Exception(s"setAnalogFeedbackSelect $resp2") else output.append(s"\nsetAnalogFeedbackSelect($analogFeedbackSelect) $resp2, ")
         
         Thread.sleep(1000) 
-        val resp3 = Await.result(galilHcdClient.setBrushlessModulus(obsId, axis, 52000), 3.seconds)
+        val resp3 = Await.result(galilHcdClient.setBrushlessModulus(obsId, axis, brushlessModulus), 3.seconds)
        
-        if (resp3.isInstanceOf[Error]) throw new Exception(s"setBrushlessModulus $resp3") else output.append(s"\nsetBrushlessModulus $resp3, ")
+        if (resp3.isInstanceOf[Error]) throw new Exception(s"setBrushlessModulus $resp3") else output.append(s"\nsetBrushlessModulus($brushlessModulus) $resp3, ")
      
         Thread.sleep(1000) 
-        val resp4 = Await.result(galilHcdClient.brushlessZero(obsId, axis, 1.0), 3.seconds)
+        val resp4 = Await.result(galilHcdClient.brushlessZero(obsId, axis, brushlessZeroVolts), 3.seconds)
         
-        if (resp4.isInstanceOf[Error]) throw new Exception(s"brushlessZero $resp4") else output.append(s"\nbrushlessZero $resp4")
+        if (resp4.isInstanceOf[Error]) throw new Exception(s"brushlessZero $resp4") else output.append(s"\nbrushlessZero($brushlessZeroVolts) $resp4")
         
         output.toString()
   
@@ -324,6 +334,21 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
     }
   }
   
+  def getConfigSync(axis: Char): Config = {
+          
+      implicit val mat: ActorMaterializer = ActorMaterializer();
+      val filePath = Paths.get("/tmt/aps/ics/galil/" + axis + "/hcd.conf")
+
+        
+      val activeFile: Option[ConfigData] = Await.result(adminApi.getActive(filePath), 3.seconds)
+        
+      val configData1 = activeFile.getOrElse(throw new Exception("no result found"))
+        
+      Await.result(configData1.toConfigObject, 3.seconds)
+                
+  }
+  
+  
   case class ConfigFormInput(data: String)
 
   private val configForm: Form[ConfigFormInput] = {
@@ -337,6 +362,8 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
   }
 
   def setConfig(axis: Char): Action[AnyContent] = {
+    logger.info(s"setConfig::$axis")
+    
     GsAction.async { implicit request =>
       processUpdateConfig(axis)
     }
@@ -364,6 +391,7 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
 
       try {
         
+        logger.info("doUpdateConfig")
         
         val exists: Boolean = Await.result(adminApi.exists(filePath), 3.seconds)
         
@@ -378,7 +406,11 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
         }
  
       } catch {
-        case e: Exception => e.getMessage()
+        
+        case e: Exception => {
+          logger.error(s"exception: ${e.getMessage()}")
+          e.getMessage()
+        }
       }
     }
   }
