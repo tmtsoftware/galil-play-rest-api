@@ -39,7 +39,8 @@ import play.api.data.Form
 import com.typesafe.config.Config
 
 
-case class AxisCountFormInput(axis: String, count: Int, analogFeedbackSelect: Int, brushlessModulus: Int, brushlessZeroVolts: Double)
+case class AxisCountFormInput(axis: String, count: Int, analogFeedbackSelect: Int, brushlessModulus: Int, brushlessZeroVolts: Double, 
+    homingJogSpeed: Int, axisType: String, homingMethod: String, axisLimitHigh: Int, axisLimitLow: Int)
 
 
 /**
@@ -79,7 +80,12 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
         "count" -> number, 
         "analogFeedbackSelect" -> number,
         "brushlessModulus" -> number,
-        "brushlessZeroVolts" -> of[Double]
+        "brushlessZeroVolts" -> of[Double], 
+        "homingJogSpeed" -> number,
+        "axisType" -> nonEmptyText, 
+        "homingMethod" -> nonEmptyText, 
+        "axisLimitHigh" -> number,
+        "axisLimitLow" -> number
       )(AxisCountFormInput.apply)(AxisCountFormInput.unapply)
     )
   }
@@ -89,6 +95,8 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
       processJsonPost()
     }
   }
+  
+  // TODO: axisType (servo or stepper) is not yet used.  Current code only supports servo.
 
   private def processJsonPost[A]()(implicit request: GsRequest[A]):  Future[Result] = {
     def failure(badForm: Form[AxisCountFormInput]) = {
@@ -112,7 +120,7 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
           Ok(Json.toJson(response)) }
         }
       
-        case "/v1/gs/home/" => doHome(Some(ObsId("123")), input.axis(0)).map { response => Ok(Json.toJson(response)) }
+        case "/v1/gs/home/" => doHome(Some(ObsId("123")), input.axis(0), input.homingJogSpeed, input.homingMethod).map { response => Ok(Json.toJson(response)) }
       
         
       }
@@ -123,10 +131,6 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
   }
   
   
-  
-  
- 
-
   
   
   def doInit(obsId: Option[ObsId], axis: Char, analogFeedbackSelect: Int, brushlessModulus: Int, brushlessZeroVolts: Double): Future[String] = {
@@ -172,7 +176,9 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
     
   }
   
-  def doHome(obsId: Option[ObsId], axis: Char): Future[String] = {
+  // TODO: homingMethod is currently only coded for full homing sequence, not index only
+  // passed 'homingMethod' should be used to branch to correct homing sequence
+  def doHome(obsId: Option[ObsId], axis: Char, homingJogSpeed: Int, homingMethod: String): Future[String] = {
   
    
     Future {
@@ -186,9 +192,9 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
         if (resp1.isInstanceOf[Error]) throw new Exception(s"setHomingMode $resp1") else output.append(s"\nsetHomingMode $resp1, ")
 
         
-        val resp2 = Await.result(galilHcdClient.setJogSpeed(obsId, axis, 166), 3.seconds)
+        val resp2 = Await.result(galilHcdClient.setJogSpeed(obsId, axis, homingJogSpeed), 3.seconds)
         
-        if (resp2.isInstanceOf[Error]) throw new Exception(s"setJogSpeed $resp2") else output.append(s"\nsetJogSpeed $resp2, ")
+        if (resp2.isInstanceOf[Error]) throw new Exception(s"setJogSpeed $resp2") else output.append(s"\nsetJogSpeed($homingJogSpeed) $resp2, ")
 
       
         val resp3 = Await.result(galilHcdClient.beginMotion(obsId, axis), 3.seconds)
