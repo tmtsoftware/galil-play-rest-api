@@ -62,7 +62,7 @@ class GsActionBuilder @Inject()(messagesApi: MessagesApi, playBodyParsers: PlayB
   override def invokeBlock[A](request: Request[A],
                               block: GsRequestBlock[A]): Future[Result] = {
     // Convert to marker context and use request in block
-    implicit val markerContext: MarkerContext = requestHeaderToMarkerContext(request)
+    //implicit val markerContext: MarkerContext = requestHeaderToMarkerContext(request)
     logger.trace(s"invokeBlock: ")
 
     val future = block(new GsRequest(request, messagesApi))

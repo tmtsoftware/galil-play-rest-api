@@ -43,7 +43,6 @@ class GsRouter @Inject()(controller: GsController) extends SimpleRouter {
       
       
       
-      
     // Example: http://localhost:9000/v1/gs/setRelTarget?axis=A&count=2
     case POST(p"/setRelTarget" ? q_o"obsId=$maybeObsId" & q"axis=$axisStr" & q"count=$countStr") =>
       controller.setRelTarget(maybeObsId.map(ObsId(_)), axisStr(0), countStr.toInt)

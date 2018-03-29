@@ -22,6 +22,7 @@ import csw.services.config.server.ServerWiring
 import csw.services.config.api.models.{ConfigData, ConfigId, ConfigMetadata, FileType}
 import java.nio.file.{Path, Paths}
 
+
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.duration._
@@ -300,8 +301,17 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
   //*******************************************************//
   
   def getConfig(axis: Char): Action[AnyContent] = GsAction.async { implicit request =>
-    doGetConfig(axis).map { response =>
-      Ok(Json.parse(response)) 
+    doGetConfig(axis).map { response => {
+     
+      if (response.startsWith("Futures")) {
+        Ok("")
+      
+      } else {
+      
+        Ok(Json.parse(response)) 
+      }
+    }
+      
     }
   }
   
@@ -314,6 +324,7 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
   
   def doGetConfig(axis: Char): Future[String] = {
       
+    logger.debug("CONFIG")
     
     implicit val mat: ActorMaterializer = ActorMaterializer();
     
@@ -330,6 +341,8 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
         val configData1 = activeFile.getOrElse(throw new Exception("no result found"))
         
         val config = Await.result(configData1.toConfigObject, 3.seconds)
+        
+        logger.debug(s"config = $config")
         
         config.root().render( ConfigRenderOptions.concise() )
         
@@ -447,6 +460,10 @@ class GsController @Inject()(cc: GsControllerComponents)(implicit ec: ExecutionC
     
     
   }
+  
+  
+  
+  
   
   
   
