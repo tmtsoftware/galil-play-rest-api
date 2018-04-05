@@ -6,3 +6,6 @@ addSbtPlugin("com.lightbend.paradox" % "sbt-paradox" % "0.3.1")
 
 // Scala formatting: "sbt scalafmt"
 addSbtPlugin("com.lucidchart" % "sbt-scalafmt" % "1.12")
+
+addSbtPlugin("com.typesafe.sbteclipse" % "sbteclipse-plugin" % "5.2.4")
+
